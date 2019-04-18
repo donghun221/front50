@@ -18,42 +18,27 @@ package com.netflix.spinnaker.front50.redis
 
 import com.netflix.spinnaker.front50.exception.NotFoundException
 import com.netflix.spinnaker.front50.model.application.Application
+import com.netflix.spinnaker.front50.redis.config.EmbeddedRedisConfig
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Import
-import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.web.WebAppConfiguration
-import spock.lang.IgnoreIf
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.test.context.TestPropertySource
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Unroll
 
-@IgnoreIf({ RedisTestHelper.redisUnavailable() })
-@WebAppConfiguration
-@ContextConfiguration(classes = [RedisSetup])
+@SpringBootTest(classes = [RedisConfig, EmbeddedRedisConfig])
+@TestPropertySource(properties = ["spinnaker.redis.enabled = true"])
 class RedisApplicationDAOSpec extends Specification {
-
-  @Configuration
-  @Import(RedisConfig)
-  static class RedisSetup {
-
-  }
-
   @Autowired
   RedisApplicationDAO redisApplicationDAO
 
   @Shared
   Map<String, String> newApplicationAttrs = [
       name: "new-application", email: "email@netflix.com", description: "My application", pdApiKey: "pdApiKey",
-      accounts: "prod,test", repoProjectKey: "project-key", repoSlug: "repo", repoType: "github"
+      accounts: "prod,test", repoProjectKey: "project-key", repoSlug: "repo", repoType: "github", trafficGuards: []
   ]
 
-  void setupSpec() {
-    System.setProperty('spinnaker.redis.enabled', 'true')
-  }
-
-  void setup() {
+  void cleanup() {
     deleteAll()
   }
 
@@ -158,6 +143,7 @@ class RedisApplicationDAOSpec extends Specification {
     attribute                        | value
     "email"                          | "updated@netflix.com"
     "description"                    | null
+    "cloudProviders"                 | "aws,titan"
   }
 
   @Unroll
@@ -180,7 +166,6 @@ class RedisApplicationDAOSpec extends Specification {
     "repoProjectKey"                 | "project-key"
     "repoSlug"                       | "repo"
     "repoType"                       | "github"
-    "cloudProviders"                 | "aws,titan"
     "platformHealthOnly"             | "true"
     "platformHealthOnlyShowOverride" | "false"
     "adHocField"                     | "postHocValidation"
@@ -191,7 +176,10 @@ class RedisApplicationDAOSpec extends Specification {
     given:
     def application = new Application([
         name       : "app1",
-        description: "My description"
+        description: "My description",
+        details: [
+            trafficGuards: []
+        ]
     ])
     redisApplicationDAO.create("app1", application)
 
@@ -282,25 +270,7 @@ class RedisApplicationDAOSpec extends Specification {
     thrown(NotFoundException)
   }
 
-  def "should report failing redis connection as not healthy"() {
-    given:
-    redisApplicationDAO.redisTemplate.connectionFactory = Mock(RedisConnectionFactory)
-
-    when:
-    def healthy = redisApplicationDAO.healthy
-
-    then:
-    healthy == false
-
-    0 * redisApplicationDAO.redisTemplate._
-
-    1 * redisApplicationDAO.redisTemplate.connectionFactory.getConnection() >> { throw new RuntimeException('Failed') }
-    0 * redisApplicationDAO.redisTemplate.connectionFactory
-  }
-
   void deleteAll() {
     redisApplicationDAO.redisTemplate.delete(RedisApplicationDAO.BOOK_KEEPING_KEY)
   }
-
-
 }

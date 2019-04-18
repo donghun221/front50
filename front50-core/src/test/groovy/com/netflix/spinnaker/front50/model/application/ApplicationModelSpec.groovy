@@ -228,6 +228,26 @@ class ApplicationModelSpec extends Specification {
     apps.size() == 2
   }
 
+  void 'should convert cloudProviders to a String if it is a list'() {
+    def listApp = new Application(cloudProviders: ['a','b'])
+    def normalApp = new Application(cloudProviders: 'a,b,c')
+
+    expect:
+    listApp.cloudProviders == 'a,b'
+    normalApp.cloudProviders == 'a,b,c'
+  }
+
+  void 'should properly initialize cloudProviders from either a String or a list'() {
+    def listApp = new Application(cloudProviders: ['a','b'])
+    def normalApp = new Application(cloudProviders: 'a,b,c')
+
+    def newApp = new Application()
+
+    expect:
+    newApp.initialize(listApp).cloudProviders == 'a,b'
+    newApp.initialize(normalApp).cloudProviders == 'a,b,c'
+  }
+
   void 'should return empty collection if no apps exist'() {
     def dao = Mock(ApplicationDAO) {
       1 * all() >> { throw new NotFoundException("no apps found") }

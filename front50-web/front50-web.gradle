@@ -14,17 +14,21 @@
  * limitations under the License.
  */
 
+apply plugin: 'spinnaker.application'
+
+if (gradle.includedProviderProjects.contains(':front50-oracle')) {
+  tasks.startScripts.dependsOn(':front50-oracle:unpackSdk')
+  tasks.startScripts.mustRunAfter(':front50-oracle:unpackSdk')
+}
+
 ext {
   springConfigLocation = System.getProperty('spring.config.location', "${System.getProperty('user.home')}/.spinnaker/")
-  repackage = System.getProperty('springBoot.repackage', "false")
 }
 
-tasks.withType(org.springframework.boot.gradle.run.BootRunTask) {
+run {
   systemProperty('spring.config.location', project.springConfigLocation)
 }
-
-apply plugin: 'org.springframework.boot'
-apply plugin: 'spinnaker.package'
+mainClassName = 'com.netflix.spinnaker.front50.Main'
 
 configurations.all {
   exclude group: 'org.slf4j', module: 'slf4j-log4j12'
@@ -32,15 +36,7 @@ configurations.all {
 
 dependencies {
   compile project(":front50-core")
-  compile project(":front50-cassandra")
-  compile project(":front50-gcs")
-  compile project(":front50-redis")
-  compile project(":front50-s3")
-  compile project(":front50-swift")
-  compile project(":front50-pipelines")
   compile project(":front50-migrations")
-  compile project(":front50-azure")
-  compile project(":front50-oracle")
 
   spinnaker.group "bootWeb"
 
@@ -48,14 +44,19 @@ dependencies {
   compile spinnaker.dependency("korkStackdriver")
   compile spinnaker.dependency("korkSwagger")
   compile spinnaker.dependency("kork")
+  compile spinnaker.dependency("lombok")
+
+  compile "com.graphql-java:graphql-spring-boot-starter:3.9.2"
 
   testCompile project(":front50-test")
+
+  // Add each included cloud provider project as a runtime dependency
+  gradle.includedProviderProjects.each {
+    runtime project(it)
+  }
 }
 
-bootRun {
-  // jamm is required when using prepared statements with in-memory C*
-  def jamm = project.configurations.compile.find { it.name.startsWith('jamm') }
-  jvmArgs applicationDefaultJvmArgs + "-javaagent:${jamm}"
+test {
+  environment "AWS_ACCESS_KEY_ID", "null"
+  environment "AWS_SECRET_KEY", "null"
 }
-
-tasks.bootRepackage.enabled = Boolean.valueOf(project.repackage)

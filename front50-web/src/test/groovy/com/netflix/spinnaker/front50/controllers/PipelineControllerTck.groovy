@@ -17,6 +17,7 @@
 package com.netflix.spinnaker.front50.controllers
 
 import com.netflix.spectator.api.NoopRegistry
+import com.netflix.spinnaker.front50.model.DefaultObjectKeyLoader
 import com.netflix.spinnaker.front50.model.S3StorageService
 import com.netflix.spinnaker.front50.model.pipeline.DefaultPipelineDAO
 import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver
@@ -27,8 +28,6 @@ import com.amazonaws.services.s3.AmazonS3Client
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spinnaker.front50.model.pipeline.Pipeline
 import com.netflix.spinnaker.front50.model.pipeline.PipelineDAO
-import com.netflix.spinnaker.front50.pipeline.PipelineRepository
-import com.netflix.spinnaker.front50.utils.CassandraTestHelper
 import com.netflix.spinnaker.front50.utils.S3TestHelper
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
@@ -56,7 +55,7 @@ abstract class PipelineControllerTck extends Specification {
     this.pipelineDAO = createPipelineDAO()
 
     mockMvc = MockMvcBuilders
-      .standaloneSetup(new PipelineController(pipelineDAO, new ObjectMapper()))
+      .standaloneSetup(new PipelineController(pipelineDAO, new ObjectMapper(), Optional.empty()))
       .setHandlerExceptionResolvers(createExceptionResolver())
       .build()
   }
@@ -281,24 +280,6 @@ abstract class PipelineControllerTck extends Specification {
   }
 }
 
-class CassandraPipelineControllerTck extends PipelineControllerTck {
-  @Shared
-  CassandraTestHelper cassandraHelper = new CassandraTestHelper()
-
-  @Shared
-  PipelineRepository pipelineRepository
-
-  @Override
-  PipelineDAO createPipelineDAO() {
-    pipelineRepository = new PipelineRepository(keyspace: cassandraHelper.keyspace)
-    pipelineRepository.init()
-
-    pipelineRepository.runQuery('''TRUNCATE pipeline''')
-
-    return pipelineRepository
-  }
-}
-
 @IgnoreIf({ S3TestHelper.s3ProxyUnavailable() })
 class S3PipelineControllerTck extends PipelineControllerTck {
   @Shared
@@ -313,8 +294,8 @@ class S3PipelineControllerTck extends PipelineControllerTck {
     amazonS3.setEndpoint("http://127.0.0.1:9999")
     S3TestHelper.setupBucket(amazonS3, "front50")
 
-    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test")
-    pipelineDAO = new DefaultPipelineDAO(storageService, scheduler, 0, new NoopRegistry())
+    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test", false, "us-east-1", true, 10_000)
+    pipelineDAO = new DefaultPipelineDAO(storageService, scheduler,new DefaultObjectKeyLoader(storageService), 0,false, new NoopRegistry())
 
     return pipelineDAO
   }

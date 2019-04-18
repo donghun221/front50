@@ -21,18 +21,16 @@ import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.s3.AmazonS3Client
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spectator.api.NoopRegistry
-import com.netflix.spinnaker.front50.config.CassandraConfigProps
 import com.netflix.spinnaker.front50.exception.NotFoundException
+import com.netflix.spinnaker.front50.model.DefaultObjectKeyLoader
 import com.netflix.spinnaker.front50.model.S3StorageService
 import com.netflix.spinnaker.front50.model.application.Application
 import com.netflix.spinnaker.front50.model.application.ApplicationDAO
-import com.netflix.spinnaker.front50.model.application.CassandraApplicationDAO
 import com.netflix.spinnaker.front50.model.application.DefaultApplicationDAO
 import com.netflix.spinnaker.front50.model.notification.NotificationDAO
 import com.netflix.spinnaker.front50.model.pipeline.PipelineDAO
 import com.netflix.spinnaker.front50.model.pipeline.PipelineStrategyDAO
 import com.netflix.spinnaker.front50.model.project.ProjectDAO
-import com.netflix.spinnaker.front50.utils.CassandraTestHelper
 import com.netflix.spinnaker.front50.utils.S3TestHelper
 import com.netflix.spinnaker.front50.validator.HasEmailValidator
 import com.netflix.spinnaker.front50.validator.HasNameValidator
@@ -95,7 +93,7 @@ abstract class ApplicationsControllerTck extends Specification {
 
   def "should create a new application"() {
     given:
-    def sampleApp = new Application(name: "SAMPLEAPP", type: "Standalone App", email: "web@netflix.com")
+    def sampleApp = new Application(name: "SAMPLEAPP", type: "Standalone App", email: "web@netflix.com", lastModifiedBy: "anonymous")
 
     when:
     def response = mockMvc
@@ -150,13 +148,15 @@ abstract class ApplicationsControllerTck extends Specification {
 
     then:
     response.andExpect status().isOk()
-    response.andExpect content().string(new ObjectMapper().writeValueAsString(dao.all()))
+
+    //The results are not in a consistent order from the DAO so sort them
+    response.andExpect content().string(new ObjectMapper().writeValueAsString(dao.all().sort {it.name}))
   }
 
   def "should update an application"() {
     given:
     def owner = "Andy McEntee"
-    def sampleApp = new Application(name: "SAMPLEAPP", email: "web@netflix.com", owner: owner)
+    def sampleApp = new Application(name: "SAMPLEAPP", email: "web@netflix.com", owner: owner, lastModifiedBy: "anonymous")
     dao.create("SAMPLEAPP", new Application())
 
     when:
@@ -244,7 +244,8 @@ abstract class ApplicationsControllerTck extends Specification {
       email: newEmail,
       dynamicPropertyToUpdate: dynamicPropertyToUpdate,
       unchangedDynamicProperty: unchangedDynamicProperty,
-      brandNewDynamicProperty: brandNewDynamicProperty
+      brandNewDynamicProperty: brandNewDynamicProperty,
+      lastModifiedBy: "anonymous"
     ))
   }
 
@@ -364,24 +365,6 @@ abstract class ApplicationsControllerTck extends Specification {
   }
 }
 
-class CassandraApplicationsControllerTck extends ApplicationsControllerTck {
-  @Shared
-  CassandraTestHelper cassandraHelper = new CassandraTestHelper()
-
-  @Shared
-  CassandraApplicationDAO applicationDAO
-
-  @Override
-  ApplicationDAO createApplicationDAO() {
-    applicationDAO = new CassandraApplicationDAO(keyspace: cassandraHelper.keyspace, objectMapper: objectMapper, cassandraConfigProps: new CassandraConfigProps())
-    applicationDAO.init()
-
-    applicationDAO.runQuery('''TRUNCATE application''')
-
-    return applicationDAO
-  }
-}
-
 @IgnoreIf({ S3TestHelper.s3ProxyUnavailable() })
 class S3ApplicationsControllerTck extends ApplicationsControllerTck {
   @Shared
@@ -396,8 +379,8 @@ class S3ApplicationsControllerTck extends ApplicationsControllerTck {
     amazonS3.setEndpoint("http://127.0.0.1:9999")
     S3TestHelper.setupBucket(amazonS3, "front50")
 
-    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test", false)
-    applicationDAO = new DefaultApplicationDAO(storageService, scheduler, 0, new NoopRegistry())
+    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test", false, "us_east1", true, 10000)
+    applicationDAO = new DefaultApplicationDAO(storageService, scheduler, new DefaultObjectKeyLoader(storageService), 0, false, new NoopRegistry())
     return applicationDAO
   }
 }

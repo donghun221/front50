@@ -17,35 +17,26 @@
 
 package com.netflix.spinnaker.front50.controllers
 
-
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.s3.AmazonS3Client
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spectator.api.NoopRegistry
+import com.netflix.spinnaker.front50.model.DefaultObjectKeyLoader
 import com.netflix.spinnaker.front50.model.S3StorageService
 import com.netflix.spinnaker.front50.model.pipeline.DefaultPipelineStrategyDAO
 import com.netflix.spinnaker.front50.model.pipeline.Pipeline
 import com.netflix.spinnaker.front50.model.pipeline.PipelineStrategyDAO
-import com.netflix.spinnaker.front50.pipeline.StrategyRepository
-import com.netflix.spinnaker.front50.utils.CassandraTestHelper
 import com.netflix.spinnaker.front50.utils.S3TestHelper
-import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver
-import rx.schedulers.Schedulers
-import spock.lang.IgnoreIf
-import spock.lang.Shared
-import spock.lang.Specification
-import spock.lang.Subject
-import spock.lang.Unroll
-
-import java.util.concurrent.Executors
-
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver
+import rx.schedulers.Schedulers
+import spock.lang.*
+
+import java.util.concurrent.Executors
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 
 abstract class StrategyControllerTck extends Specification {
 
@@ -206,24 +197,6 @@ abstract class StrategyControllerTck extends Specification {
   }
 }
 
-class CassandraStrategyControllerTck extends StrategyControllerTck {
-  @Shared
-  CassandraTestHelper cassandraHelper = new CassandraTestHelper()
-
-  @Shared
-  StrategyRepository strategyRepository
-
-  @Override
-  PipelineStrategyDAO createPipelineStrategyDAO() {
-    strategyRepository = new StrategyRepository(keyspace: cassandraHelper.keyspace)
-    strategyRepository.init()
-
-    strategyRepository.runQuery('''TRUNCATE strategy''')
-
-    return strategyRepository
-  }
-}
-
 @IgnoreIf({ S3TestHelper.s3ProxyUnavailable() })
 class S3StrategyControllerTck extends StrategyControllerTck {
   @Shared
@@ -238,8 +211,8 @@ class S3StrategyControllerTck extends StrategyControllerTck {
     amazonS3.setEndpoint("http://127.0.0.1:9999")
     S3TestHelper.setupBucket(amazonS3, "front50")
 
-    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test")
-    pipelineStrategyDAO = new DefaultPipelineStrategyDAO(storageService, scheduler, 0, new NoopRegistry())
+    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test", false, "us-east-1", true, 10_000)
+    pipelineStrategyDAO = new DefaultPipelineStrategyDAO(storageService, scheduler, new DefaultObjectKeyLoader(storageService), 0, false, new NoopRegistry())
 
     return pipelineStrategyDAO
   }

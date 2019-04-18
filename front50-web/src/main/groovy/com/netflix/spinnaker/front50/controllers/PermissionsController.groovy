@@ -25,18 +25,15 @@ import com.netflix.spinnaker.front50.model.application.ApplicationPermissionDAO
 import groovy.util.logging.Slf4j
 import io.swagger.annotations.ApiOperation
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression
-import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestMethod
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.*
 import retrofit.RetrofitError
 
 @Slf4j
 @RestController
 @RequestMapping("/permissions")
-@ConditionalOnExpression('${spinnaker.gcs.enabled:false} || ${spinnaker.s3.enabled:false} || ${spinnaker.azs.enabled:false}')
+@ConditionalOnExpression('${spinnaker.gcs.enabled:false} || ${spinnaker.s3.enabled:false} || ${spinnaker.azs.enabled:false} || ${spinnaker.oracle.enabled:false}')
 public class PermissionsController {
 
   @Autowired
@@ -50,6 +47,9 @@ public class PermissionsController {
 
   @Autowired
   FiatClientConfigurationProperties fiatClientConfigurationProperties
+
+  @Value('${fiat.roleSync.enabled:true}')
+  Boolean roleSync
 
   @ApiOperation(value = "", notes = "Get all application permissions. Internal use only.")
   @RequestMapping(method = RequestMethod.GET, value = "/applications")
@@ -70,6 +70,11 @@ public class PermissionsController {
     }
 
     return actualPermissions.values()
+  }
+
+  @RequestMapping(method = RequestMethod.GET, value = "/applications/{appName:.+}")
+  Application.Permission getApplicationPermission(@PathVariable String appName) {
+      return applicationPermissionDAO.findById(appName)
   }
 
   @ApiOperation(value = "", notes = "Create an application permission.")
@@ -119,10 +124,12 @@ public class PermissionsController {
       roles += oldPermission.permissions.allGroups()
     }
 
-    try {
-      fiatService.sync(roles as List)
-    } catch (RetrofitError re) {
-      log.warn("Error syncing users", re)
+    if (!roles.isEmpty() && roleSync) {
+      try {
+        fiatService.sync(roles as List)
+      } catch (RetrofitError re) {
+        log.warn("Error syncing users", re)
+      }
     }
   }
 }

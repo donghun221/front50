@@ -59,8 +59,8 @@ public class ApplicationsController {
   @Autowired(required = false)
   List<ApplicationEventListener> applicationEventListeners = []
 
-  @PreAuthorize("@fiatPermissionEvaluator.storeWholePermission()")
-  @PostFilter("hasPermission(filterObject.name, 'APPLICATION', 'READ')")
+  @PreAuthorize("#restricted ? @fiatPermissionEvaluator.storeWholePermission() : true")
+  @PostFilter("#restricted ? hasPermission(filterObject.name, 'APPLICATION', 'READ') : true")
   @ApiOperation(value = "", notes = """Fetch all applications.
 
     Supports filtering by one or more attributes:
@@ -68,17 +68,30 @@ public class ApplicationsController {
     - ?email=my@email.com&name=flex""")
   @RequestMapping(method = RequestMethod.GET)
   Set<Application> applications(@RequestParam(value = "pageSize", required = false) Integer pageSize,
+                                @RequestParam(required = false, value = 'restricted', defaultValue = 'true') boolean restricted,
                                 @RequestParam Map<String, String> params) {
     params.remove("pageSize")
+    params.remove("restricted")
 
     def applications
+    def permissions = applicationPermissionDAO ? applicationPermissionDAO.all()
+      .findAll { !it.permissions.isEmpty() }
+      .groupBy { it.name.toLowerCase() } : [:]
     if (params.isEmpty()) {
       applications = applicationDAO.all().sort { it.name }
     } else {
       applications = applicationDAO.search(params)
     }
 
-    return pageSize ? applications.asList().subList(0, Math.min(pageSize, applications.size())) : applications
+    Set<Application> results = pageSize ? applications.asList().subList(0, Math.min(pageSize, applications.size())) : applications
+    results.each { application ->
+      if (permissions.containsKey(application.name.toLowerCase())) {
+        application.set("permissions", permissions.get(application.name.toLowerCase())[0].permissions)
+      } else {
+        application.details().remove("permissions")
+      }
+    }
+    return results
   }
 
   // TODO(ttomsu): Think through application creation permissions.
@@ -121,6 +134,8 @@ public class ApplicationsController {
       def perm = applicationPermissionDAO?.findById(app.name)
       if (perm?.permissions?.isRestricted()) {
         app.details().put("permissions", perm.permissions)
+      } else {
+        app.details().remove("permissions")
       }
     } catch (NotFoundException nfe) {
       // ignored.

@@ -17,14 +17,14 @@ package com.netflix.spinnaker.front50.model.pipeline;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.netflix.spinnaker.front50.model.Timestamped;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.PatternSyntaxException;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PipelineTemplate extends HashMap<String, Object> implements Timestamped {
 
@@ -41,16 +41,60 @@ public class PipelineTemplate extends HashMap<String, Object> implements Timesta
     return scopes != null ? scopes : Collections.emptyList();
   }
 
+  /**
+   * @return Un-decorated MPT id.
+   */
+  public String undecoratedId() {
+    return (String) super.get("id");
+  }
+
+  /**
+   * @return Decorated id with appended digest or tag.
+   */
   @Override
   public String getId() {
-    return (String) super.get("id");
+    String digest = getDigest();
+    String tag = getTag();
+    String id = (String) super.get("id");
+    if (StringUtils.isNotEmpty(digest)) {
+      return String.format("%s@sha256:%s", id, digest);
+    } else if (StringUtils.isNotEmpty(tag)) {
+      return String.format("%s:%s", id, tag);
+    } else {
+      return id;
+    }
   }
 
   public void setId(String id) { super.put("id", id); }
 
+  public String getTag() {
+    return (String) super.get("tag");
+  }
+
+  public void setTag(String tag) {
+    super.put("tag", tag);
+  }
+
+  public String getDigest() {
+    return (String) super.get("digest");
+  }
+
+  public void setDigest(String digest) {
+    super.put("digest", digest);
+  }
+
   @Override
   public Long getLastModified() {
     String updateTs = (String) super.get("updateTs");
+    return (updateTs != null) ? Long.valueOf(updateTs) : null;
+  }
+
+  /**
+   * Removes and returns last modified time from the pipeline template.
+   * @return last modified time of the pipeline template.
+   */
+  public Long removeLastModified() {
+    String updateTs = (String) super.remove("updateTs");
     return (updateTs != null) ? Long.valueOf(updateTs) : null;
   }
 
@@ -62,6 +106,14 @@ public class PipelineTemplate extends HashMap<String, Object> implements Timesta
   @Override
   public String getLastModifiedBy() {
     return (String) super.get("lastModifiedBy");
+  }
+
+  /**
+   * Removes and returns user that last modified the pipeline template.
+   * @return user last modifying the pipeline template.
+   */
+  public String removeLastModifiedBy() {
+    return (String) super.remove("lastModifiedBy");
   }
 
   @Override

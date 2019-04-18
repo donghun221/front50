@@ -53,12 +53,26 @@ class Application implements Timestamped {
   String updateTs
   String createTs
   String lastModifiedBy
+  Object cloudProviders // might be persisted as a List or a String
 
   private Map<String, Object> details = new HashMap<String, Object>()
+
+  String getCloudProviders() {
+    // Orca expects a String
+    return cloudProviders instanceof List ? cloudProviders.join(',') : cloudProviders
+  }
 
   String getName() {
     // there is an expectation that application names are uppercased (historical)
     return name?.toUpperCase()?.trim()
+  }
+
+  List<TrafficGuard> getTrafficGuards() {
+    (List<TrafficGuard>) details.trafficGuards ?: []
+  }
+
+  void setTrafficGuards(List<TrafficGuard> trafficGuards) {
+    set("trafficGuards", trafficGuards)
   }
 
   @JsonAnyGetter
@@ -79,12 +93,13 @@ class Application implements Timestamped {
         email: this.email,
         updateTs: this.updateTs,
         createTs: this.createTs,
-        details: this.details
+        details: this.details,
+        cloudProviders: this.cloudProviders,
     ]
   }
 
   @JsonIgnore
-  ApplicationDAO dao
+  public ApplicationDAO dao
 
   @JsonIgnore
   ProjectDAO projectDao
@@ -110,6 +125,7 @@ class Application implements Timestamped {
     updatedApplication.createTs = this.createTs
     updatedApplication.description = updatedApplication.description ?: this.description
     updatedApplication.email = updatedApplication.email ?: this.email
+    updatedApplication.cloudProviders = updatedApplication.cloudProviders ?: this.cloudProviders
     mergeDetails(updatedApplication, this)
     validate(updatedApplication)
 
@@ -181,6 +197,7 @@ class Application implements Timestamped {
     projectDao.all().findAll {
         it.config.applications.contains(application.toLowerCase())
       }.each {
+        log.info("Removing application {} from project {}", application, it.id)
         it.config.applications.remove(application.toLowerCase())
         it.config.clusters.each { cluster ->
           cluster.applications?.remove(application.toLowerCase())
@@ -198,8 +215,13 @@ class Application implements Timestamped {
   }
 
   private void deletePipelines(String application) {
-    pipelineDao.getPipelinesByApplication(application, true).each { Pipeline p -> pipelineDao.delete(p.id) }
-    pipelineStrategyDao.getPipelinesByApplication(application).each { Pipeline p -> pipelineStrategyDao.delete(p.id) }
+    Collection<Pipeline> pipelinesToDelete = pipelineDao.getPipelinesByApplication(application, true)
+    log.info("Deleting pipelines for application {}: {}", application, pipelinesToDelete.findResults { it.id } )
+    pipelinesToDelete.each { Pipeline p -> pipelineDao.delete(p.id) }
+
+    Collection<Pipeline> strategiesToDelete = pipelineStrategyDao.getPipelinesByApplication(application)
+    log.info("Deleting strategies for application {}: {}", application, strategiesToDelete.findResults { it.id } )
+    strategiesToDelete.each { Pipeline p -> pipelineStrategyDao.delete(p.id) }
   }
 
   Application clear() {
@@ -386,5 +408,13 @@ class Application implements Timestamped {
         permissions = b.build()
       }
     }
+  }
+
+  static class TrafficGuard {
+    String account
+    String stack
+    String detail
+    String location
+    Boolean enabled = true
   }
 }

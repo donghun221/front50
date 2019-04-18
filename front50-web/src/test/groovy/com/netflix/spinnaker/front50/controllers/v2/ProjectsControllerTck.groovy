@@ -21,15 +21,14 @@ import com.amazonaws.ClientConfiguration
 import com.amazonaws.services.s3.AmazonS3Client
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spectator.api.NoopRegistry
-import com.netflix.spinnaker.front50.config.CassandraConfigProps
 import com.netflix.spinnaker.front50.controllers.SimpleExceptionHandlerExceptionResolver
 import com.netflix.spinnaker.front50.exception.NotFoundException
+import com.netflix.spinnaker.front50.model.DefaultObjectKeyLoader
 import com.netflix.spinnaker.front50.model.S3StorageService
-import com.netflix.spinnaker.front50.model.project.CassandraProjectDAO
+import com.netflix.spinnaker.front50.model.StorageService
 import com.netflix.spinnaker.front50.model.project.DefaultProjectDAO
 import com.netflix.spinnaker.front50.model.project.Project
 import com.netflix.spinnaker.front50.model.project.ProjectDAO
-import com.netflix.spinnaker.front50.utils.CassandraTestHelper
 import com.netflix.spinnaker.front50.utils.S3TestHelper
 import org.springframework.context.support.StaticMessageSource
 import org.springframework.http.MediaType
@@ -37,18 +36,11 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver
 import rx.schedulers.Schedulers
-import spock.lang.IgnoreIf
-import spock.lang.Shared
-import spock.lang.Specification
-import spock.lang.Subject
-import spock.lang.Unroll
+import spock.lang.*
 
 import java.util.concurrent.Executors
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
@@ -69,6 +61,7 @@ abstract class ProjectsControllerTck extends Specification {
 
   void setup() {
     this.dao = createProjectDAO()
+
     this.controller = new ProjectsController(
         projectDAO: dao,
         messageSource: new StaticMessageSource()
@@ -258,6 +251,8 @@ abstract class ProjectsControllerTck extends Specification {
     // apply an update
     project.email = "default@netflix.com"
 
+    //FIXME fix race condition
+    sleep(2500)
     when:
     def response = mockMvc.perform(
         put("/v2/projects/" + project.id).contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(project))
@@ -265,6 +260,7 @@ abstract class ProjectsControllerTck extends Specification {
 
     then:
     response.andExpect(status().isOk())
+
     dao.findByName(project.name).email == project.email
 
     when:
@@ -310,24 +306,6 @@ abstract class ProjectsControllerTck extends Specification {
   }
 }
 
-class CassandraProjectsControllerTck extends ProjectsControllerTck {
-  @Shared
-  CassandraTestHelper cassandraHelper = new CassandraTestHelper()
-
-  @Shared
-  CassandraProjectDAO projectDAO
-
-  @Override
-  ProjectDAO createProjectDAO() {
-    projectDAO = new CassandraProjectDAO(keyspace: cassandraHelper.keyspace, objectMapper: objectMapper, cassandraConfigProps: new CassandraConfigProps())
-    projectDAO.init()
-
-    projectDAO.runQuery('''TRUNCATE project''')
-
-    return projectDAO
-  }
-}
-
 @IgnoreIf({ S3TestHelper.s3ProxyUnavailable() })
 class S3ProjectsControllerTck extends ProjectsControllerTck {
   @Shared
@@ -336,14 +314,16 @@ class S3ProjectsControllerTck extends ProjectsControllerTck {
   @Shared
   ProjectDAO projectDAO
 
+
+
   @Override
   ProjectDAO createProjectDAO() {
     def amazonS3 = new AmazonS3Client(new ClientConfiguration())
     amazonS3.setEndpoint("http://127.0.0.1:9999")
     S3TestHelper.setupBucket(amazonS3, "front50")
 
-    def storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test")
-    projectDAO = new DefaultProjectDAO(storageService, scheduler, 0, new NoopRegistry())
+    StorageService storageService = new S3StorageService(new ObjectMapper(), amazonS3, "front50", "test", false, "us-east-1", true, 10_000)
+    projectDAO = new DefaultProjectDAO(storageService, scheduler, new DefaultObjectKeyLoader(storageService), 0, false, new NoopRegistry())
 
     return projectDAO
   }

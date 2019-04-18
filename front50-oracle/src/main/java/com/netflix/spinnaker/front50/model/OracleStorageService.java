@@ -8,18 +8,27 @@
  */
 package com.netflix.spinnaker.front50.model;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ser.FilterProvider;
+import com.fasterxml.jackson.databind.ser.impl.SimpleFilterProvider;
 import com.google.common.base.Supplier;
 import com.netflix.spinnaker.front50.config.OracleProperties;
 import com.netflix.spinnaker.front50.exception.NotFoundException;
 import com.oracle.bmc.auth.AuthenticationDetailsProvider;
 import com.oracle.bmc.auth.SimpleAuthenticationDetailsProvider;
 import com.oracle.bmc.auth.SimplePrivateKeySupplier;
+import com.oracle.bmc.http.internal.ExplicitlySetFilter;
 import com.oracle.bmc.http.signing.DefaultRequestSigner;
 import com.oracle.bmc.http.signing.RequestSigner;
 import com.oracle.bmc.objectstorage.model.CreateBucketDetails;
 import com.oracle.bmc.objectstorage.model.ListObjects;
 import com.oracle.bmc.objectstorage.model.ObjectSummary;
-import com.sun.jersey.api.client.*;
+import com.sun.jersey.api.client.Client;
+import com.sun.jersey.api.client.ClientHandlerException;
+import com.sun.jersey.api.client.ClientRequest;
+import com.sun.jersey.api.client.ClientResponse;
+import com.sun.jersey.api.client.UniformInterfaceException;
+import com.sun.jersey.api.client.WebResource;
 import com.sun.jersey.api.client.config.ClientConfig;
 import com.sun.jersey.api.client.config.DefaultClientConfig;
 import com.sun.jersey.api.client.filter.ClientFilter;
@@ -29,17 +38,24 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.UriBuilder;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class OracleStorageService implements StorageService {
 
   private final Client client;
+
   private final String endpoint = "https://objectstorage.{arg0}.oraclecloud.com";
   private final String region;
   private final String namespace;
   private final String compartmentId;
   private final String bucketName;
 
+  private final ObjectMapper objectMapper = new ObjectMapper();
 
   private class RequestSigningFilter extends ClientFilter {
     private final RequestSigner signer;
@@ -79,6 +95,7 @@ public class OracleStorageService implements StorageService {
             .userId(oracleProperties.getUserId())
             .fingerprint(oracleProperties.getFingerprint())
             .privateKeySupplier(privateKeySupplier)
+            .passPhrase(oracleProperties.getPrivateKeyPassphrase())
             .tenantId(oracleProperties.getTenancyId())
             .build();
 
@@ -87,6 +104,9 @@ public class OracleStorageService implements StorageService {
     ClientConfig clientConfig = new DefaultClientConfig();
     client = new Client(new URLConnectionClientHandler(), clientConfig);
     client.addFilter(new OracleStorageService.RequestSigningFilter(requestSigner));
+
+    FilterProvider filters = new SimpleFilterProvider().addFilter(ExplicitlySetFilter.NAME, ExplicitlySetFilter.INSTANCE);
+    objectMapper.setFilterProvider(filters);
   }
 
   @Override
@@ -103,7 +123,12 @@ public class OracleStorageService implements StorageService {
       wr = client.resource(UriBuilder.fromPath(endpoint + "/n/{arg1}/b/")
               .build(region, namespace));
       wr.accept(MediaType.APPLICATION_JSON_TYPE);
-      wr.post(createBucketDetails);
+      try {
+        byte[] bytes = objectMapper.writeValueAsBytes(createBucketDetails);
+        wr.post(new String(bytes, StandardCharsets.UTF_8));
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
     } else if (rsp.getStatus() != 200) {
       throw new RuntimeException(rsp.toString());
     }
@@ -152,7 +177,12 @@ public class OracleStorageService implements StorageService {
     WebResource wr = client.resource(UriBuilder.fromPath(endpoint + "/n/{arg1}/b/{arg2}/o/{arg3}")
             .build(region, namespace, bucketName, buildOSSKey(objectType.group, objectKey, objectType.defaultMetadataFilename)));
     wr.accept(MediaType.APPLICATION_JSON_TYPE);
-    wr.put(item);
+    try {
+      byte[] bytes = objectMapper.writeValueAsBytes(item);
+      wr.put(new String(bytes, StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
 
     updateLastModified(objectType);
   }
@@ -196,7 +226,12 @@ public class OracleStorageService implements StorageService {
     WebResource wr = client.resource(UriBuilder.fromPath(endpoint + "/n/{arg1}/b/{arg2}/o/{arg3}")
             .build(region, namespace, bucketName, objectType.group + "/last-modified.json"));
     wr.accept(MediaType.APPLICATION_JSON_TYPE);
-    wr.put(new LastModified());
+    try {
+      byte[] bytes = objectMapper.writeValueAsBytes(new LastModified());
+      wr.put(new String(bytes, StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   private String buildOSSKey(String group, String objectKey, String metadataFilename) {
